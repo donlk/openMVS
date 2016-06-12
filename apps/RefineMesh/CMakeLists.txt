@@ -7,6 +7,10 @@ FILE(GLOB LIBRARY_FILES_H "*.h" "*.inl")
 
 cxx_executable_with_flags_no_pch(RefineMesh "Apps" "${cxx_default}" "MVS" ${LIBRARY_FILES_C} ${LIBRARY_FILES_H})
 
+if(OpenMVS_USE_CUDA)
+	target_link_libraries(RefineMesh "-lcuda")
+endif()
+
 if(OpenMVS_USE_BREAKPAD AND BREAKPAD_FOUND)
 	target_link_libraries(RefineMesh ${BREAKPAD_LIBS})
 endif()
