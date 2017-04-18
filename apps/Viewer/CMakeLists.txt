@@ -60,6 +60,10 @@ if(OpenMVS_USE_BREAKPAD AND BREAKPAD_FOUND)
 	target_link_libraries(${VIEWER_NAME} ${BREAKPAD_LIBS})
 endif()
 
+if(OpenMVS_USE_CUDA)
+	target_link_libraries(${VIEWER_NAME} "-lcuda")
+endif()
+
 # Install
 INSTALL(TARGETS ${VIEWER_NAME}
 	EXPORT 3DnovatorTargets
