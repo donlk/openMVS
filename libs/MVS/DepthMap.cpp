@@ -65,7 +65,7 @@ MDEFVAR_OPTDENSE_uint32(nMinResolution, "Min Resolution", "Do not scale images l
 DEFVAR_OPTDENSE_uint32(nResolutionLevel, "Resolution Level", "How many times to scale down the images before dense reconstruction", "1")
 DEFVAR_OPTDENSE_uint32(nMinViews, "Min Views", "minimum number of agreeing views to validate a depth", "2")
 MDEFVAR_OPTDENSE_uint32(nMaxViews, "Max Views", "maximum number of neighbor images used to compute the depth-map for the reference image", "12")
-DEFVAR_OPTDENSE_uint32(nMinViewsFuse, "Min Views Fuse", "minimum number of images that agrees with an estimate during fusion in order to consider it inlier", "3")
+DEFVAR_OPTDENSE_uint32(nMinViewsFuse, "Min Views Fuse", "minimum number of images that agrees with an estimate during fusion in order to consider it inlier", "2")
 DEFVAR_OPTDENSE_uint32(nMinViewsFilter, "Min Views Filter", "minimum number of images that agrees with an estimate in order to consider it inlier", "2")
 MDEFVAR_OPTDENSE_uint32(nMinViewsFilterAdjust, "Min Views Filter Adjust", "minimum number of images that agrees with an estimate in order to consider it inlier (0 - disabled)", "1")
 MDEFVAR_OPTDENSE_uint32(nMinViewsTrustPoint, "Min Views Trust Point", "min-number of views so that the point is considered for approximating the depth-maps (<2 - random initialization)", "2")
@@ -853,7 +853,7 @@ bool MVS::ExportPointCloud(const String& fileName, const Image& imageData, const
 
 		// create PLY object
 		ASSERT(!fileName.IsEmpty());
-		Util::ensureDirectory(fileName);
+		Util::ensureFolder(fileName);
 		const size_t bufferSize = depthMap.area()*(8*3/*pos*/+3*3/*color*/+7/*space*/+2/*eol*/) + 2048/*extra size*/;
 		PLY ply;
 		if (!ply.write(fileName, 1, elem_names, PLY::BINARY_LE, bufferSize))
@@ -909,7 +909,7 @@ bool MVS::ExportPointCloud(const String& fileName, const Image& imageData, const
 
 		// create PLY object
 		ASSERT(!fileName.IsEmpty());
-		Util::ensureDirectory(fileName);
+		Util::ensureFolder(fileName);
 		const size_t bufferSize = depthMap.area()*(8*3/*pos*/+8*3/*normal*/+3*3/*color*/+8/*space*/+2/*eol*/) + 2048/*extra size*/;
 		PLY ply;
 		if (!ply.write(fileName, 1, elem_names, PLY::BINARY_LE, bufferSize))
@@ -1058,7 +1058,7 @@ void MVS::CompareNormalMaps(const NormalMap& normalMap, const NormalMap& normalM
 	const float mean((float)ms.GetMean());
 	const float stddev((float)ms.GetStdDev());
 	const std::pair<float,float> th(ComputeX84Threshold<float,float>(errors.Begin(), errors.GetSize()));
-	VERBOSE("Normal-maps compared for image % 3u: %.2f median %.2f mean %.2f stddev error° (%s)",
+	VERBOSE("Normal-maps compared for image % 3u: %.2f median %.2f mean %.2f stddev error (%s)",
 		idxImage,
 		th.first, mean, stddev,
 		TD_TIMER_GET_FMT().c_str()

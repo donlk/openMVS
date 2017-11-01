@@ -62,6 +62,7 @@ public:
 	inline Scene(unsigned _nMaxThreads=0) : nMaxThreads(Thread::getMaxThreads(_nMaxThreads)) {}
 
 	void Release();
+	bool IsEmpty() const;
 
 	bool LoadInterface(const String& fileName);
 	bool SaveInterface(const String& fileName) const;
@@ -81,7 +82,7 @@ public:
 
 	// Mesh reconstruction
 	bool ReconstructMesh(float distInsert=2, bool bUseFreeSpaceSupport=true, unsigned nItersFixNonManifold=4,
-						 float kQual=1.f, float kb=4.f,
+						 float kSigma=2.f, float kQual=1.f, float kb=4.f,
 						 float kf=3.f, float kRel=0.1f/*max 0.3*/, float kAbs=1000.f/*min 500*/, float kOutl=400.f/*max 700.f*/,
 						 float kInf=(float)(INT_MAX/8));
 

@@ -47,6 +47,7 @@
 #include <vcg/complex/algorithms/clean.h>
 #include <vcg/complex/algorithms/smooth.h>
 #include <vcg/complex/algorithms/hole.h>
+#include <vcg/complex/algorithms/polygon_support.h>
 // VCG: mesh simplification
 #include <vcg/complex/algorithms/update/position.h>
 #include <vcg/complex/algorithms/update/bounding.h>
@@ -92,6 +93,26 @@ void Mesh::EmptyExtra()
 	faceTexcoords.Empty();
 	textureDiffuse.release();
 } // EmptyExtra
+/*----------------------------------------------------------------*/
+
+
+// compute the axis-aligned bounding-box of the mesh
+Mesh::Box Mesh::GetAABB() const
+{
+	Box box(true);
+	for (const Vertex& X: vertices)
+		box.InsertFull(X);
+	return box;
+}
+// same, but only for vertices inside the given AABB
+Mesh::Box Mesh::GetAABB(const Box& bound) const
+{
+	Box box(true);
+	for (const Vertex& X: vertices)
+		if (bound.Intersects(X))
+			box.InsertFull(X);
+	return box;
+}
 /*----------------------------------------------------------------*/
 
 
@@ -1421,7 +1442,7 @@ bool Mesh::Save(const String& fileName, const cList<String>& comments, bool bBin
 bool Mesh::SavePLY(const String& fileName, const cList<String>& comments, bool bBinary) const
 {
 	ASSERT(!fileName.IsEmpty());
-	Util::ensureDirectory(fileName);
+	Util::ensureFolder(fileName);
 
 	// create PLY object
 	const size_t bufferSize(vertices.GetSize()*(4*3/*pos*/+2/*eol*/) + faces.GetSize()*(1*1/*len*/+4*3/*idx*/+2/*eol*/) + 2048/*extra size*/);
@@ -1438,8 +1459,8 @@ bool Mesh::SavePLY(const String& fileName, const cList<String>& comments, bool b
 	// export texture file name as comment if needed
 	String textureFileName;
 	if (!faceTexcoords.IsEmpty() && !textureDiffuse.empty()) {
-		textureFileName = Util::getFullFileName(fileName)+_T(".png");
-		ply.append_comment((_T("TextureFile ")+Util::getFileFullName(textureFileName)).c_str());
+		textureFileName = Util::getFileFullName(fileName)+_T(".png");
+		ply.append_comment((_T("TextureFile ")+Util::getFileNameExt(textureFileName)).c_str());
 	}
 
 	if (vertexNormals.IsEmpty()) {
@@ -1504,7 +1525,7 @@ bool Mesh::SavePLY(const String& fileName, const cList<String>& comments, bool b
 bool Mesh::SaveOBJ(const String& fileName) const
 {
 	ASSERT(!fileName.IsEmpty());
-	Util::ensureDirectory(fileName);
+	Util::ensureFolder(fileName);
 
 	// create the OBJ model
 	ObjModel model;
@@ -1557,7 +1578,7 @@ bool Mesh::SaveOBJ(const String& fileName) const
 bool Mesh::Save(const VertexArr& vertices, const String& fileName, bool bBinary)
 {
 	ASSERT(!fileName.IsEmpty());
-	Util::ensureDirectory(fileName);
+	Util::ensureFolder(fileName);
 
 	// create PLY object
 	const size_t bufferSize(vertices.GetSize()*(4*3/*pos*/+2/*eol*/) + 2048/*extra size*/);
@@ -3397,6 +3418,27 @@ void Mesh::RemoveVertices(VertexIdxArr& vertexRemove, bool bUpdateLists)
 /*----------------------------------------------------------------*/
 
 
+// computes the area of the mesh surface as the sum of the signed areas of its faces
+REAL Mesh::ComputeArea() const
+{
+	REAL area(0);
+	for (const Face& face: faces)
+		area += ComputeTriangleArea(vertices[face[0]], vertices[face[1]], vertices[face[2]]);
+	return area;
+}
+
+// computes the signed volume of the domain bounded by the mesh surface
+// (note: valid only for closed and orientable manifolds)
+REAL Mesh::ComputeVolume() const
+{
+	REAL volume(0);
+	for (const Face& face: faces)
+		volume += ComputeTriangleVolume(vertices[face[0]], vertices[face[1]], vertices[face[2]]);
+	return volume;
+}
+/*----------------------------------------------------------------*/
+
+
 // project mesh to the given camera plane
 void Mesh::Project(const Camera& camera, DepthMap& depthMap) const
 {
@@ -3499,7 +3541,10 @@ void Mesh::ProjectOrtho(const Camera& camera, DepthMap& depthMap, Image8U3& imag
 			pti[v] = camera.TransformPointC2I((const Point2&)ptc[v]);
 			return depthMap.isInsideWithBorder<float,3>(pti[v]);
 		}
-		inline void SetupNormalPlane() {
+		inline bool CheckNormal(const Point3& /*faceCenter*/) {
+			// skip face if the (cos) angle between
+			// the face normal and the view direction is negative
+			return camera.Direction().dot(normalPlane) >= ZEROTOLERANCE<REAL>();
 		}
 		void Raster(const ImageRef& pt) {
 			if (!depthMap.isInsideWithBorder<float,3>(pt))
@@ -3531,9 +3576,10 @@ void Mesh::ProjectOrtho(const Camera& camera, DepthMap& depthMap, Image8U3& imag
 void Mesh::ProjectOrthoTopDown(unsigned resolution, Image8U3& image, Image8U& mask, Point3& center) const
 {
 	ASSERT(!IsEmpty() && !textureDiffuse.empty());
+	// initialize camera
 	const AABB3f box(vertices.Begin(), vertices.GetSize());
-	const Point3 size(box.GetSize().cast<REAL>());
-	center = box.GetCenter().cast<REAL>();
+	const Point3 size(Vertex(box.GetSize())*1.01f/*border*/);
+	center = Vertex(box.GetCenter());
 	Camera camera;
 	camera.R.SetFromDirUp(Vec3(Point3(0,0,-1)), Vec3(Point3(0,1,0)));
 	camera.C = center;
@@ -3548,13 +3594,19 @@ void Mesh::ProjectOrthoTopDown(unsigned resolution, Image8U3& image, Image8U& ma
 	}
 	camera.K(0,2) = (REAL)(image.width()-1)/2;
 	camera.K(1,2) = (REAL)(image.height()-1)/2;
+	// project mesh
 	DepthMap depthMap(image.size());
 	ProjectOrtho(camera, depthMap, image);
+	// create mask for the valid image pixels
 	if (mask.size() != depthMap.size())
 		mask.create(depthMap.size());
 	for (int r=0; r<mask.rows; ++r)
 		for (int c=0; c<mask.cols; ++c)
 			mask(r,c) = depthMap(r,c) > 0 ? 255 : 0;
+	// compute 3D coordinates for the image center
+	const ImageRef xCenter(image.width()/2, image.height()/2);
+	const Depth depthCenter(depthMap(xCenter));
+	center = camera.TransformPointI2W(Point3(xCenter.x, xCenter.y, depthCenter > 0 ? depthCenter : camera.C.z-center.z));
 }
 /*----------------------------------------------------------------*/
 
@@ -3571,9 +3623,9 @@ bool Mesh::InitKernels(int device)
 	// initialize CUDA kernels
 	if (!kernelComputeFaceNormal.IsValid()) {
 		// kernel used to compute face normal, given the array of face vertices and vertex positions
-		COMPILE_TIME_ASSERT(sizeof(Vertex) == sizeof(float)*3);
-		COMPILE_TIME_ASSERT(sizeof(Face) == sizeof(VIndex)*3 && sizeof(VIndex) == sizeof(uint32_t));
-		COMPILE_TIME_ASSERT(sizeof(Normal) == sizeof(float)*3);
+		STATIC_ASSERT(sizeof(Vertex) == sizeof(float)*3);
+		STATIC_ASSERT(sizeof(Face) == sizeof(VIndex)*3 && sizeof(VIndex) == sizeof(uint32_t));
+		STATIC_ASSERT(sizeof(Normal) == sizeof(float)*3);
 		#define FUNC "ComputeFaceNormal"
 		LPCSTR const szKernel =
 			".version 3.2\n"

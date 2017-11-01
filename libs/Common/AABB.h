@@ -23,15 +23,15 @@ namespace SEACAVE {
 template <typename TYPE, int DIMS>
 class TAABB
 {
-	COMPILE_TIME_ASSERT(DIMS > 0 && DIMS <= 3);
+	STATIC_ASSERT(DIMS > 0 && DIMS <= 3);
 
 public:
 	typedef TYPE Type;
 	typedef Eigen::Matrix<TYPE,DIMS,1> POINT;
 	typedef Eigen::Matrix<TYPE,DIMS,DIMS,Eigen::RowMajor> MATRIX;
-	static const int numChildren = (2<<(DIMS-1));
-	static const int numCorners = (DIMS==1 ? 2 : (DIMS==2 ? 4 : 8)); // 2^DIMS
-	static const int numScalar = (2*DIMS);
+	enum { numChildren = (2<<(DIMS-1)) };
+	enum { numCorners = (DIMS==1 ? 2 : (DIMS==2 ? 4 : 8)) }; // 2^DIMS
+	enum { numScalar = (2*DIMS) };
 
 	POINT ptMin, ptMax;	// box extreme points
 
@@ -44,6 +44,8 @@ public:
 	inline TAABB(const POINT& center, const TYPE& radius);
 	template <typename TPoint>
 	inline TAABB(const TPoint* pts, size_t n);
+	template <typename CTYPE>
+	inline TAABB(const TAABB<CTYPE, DIMS>&);
 
 	inline void Reset();
 	inline void Set(const POINT& _pt);
@@ -51,6 +53,8 @@ public:
 	inline void Set(const POINT& center, const TYPE& radius);
 	template <typename TPoint>
 	inline void Set(const TPoint* pts, size_t n);
+
+	inline bool IsEmpty() const;
 
 	inline void Enlarge(TYPE);
 	inline void EnlargePercent(TYPE);

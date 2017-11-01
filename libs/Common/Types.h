@@ -28,7 +28,11 @@
 #include <string.h>
 #endif
 #ifdef _SUPPORT_CPP11
+#ifdef __clang__
+#include <stdint.h>
+#else
 #include <cstdint>
+#endif
 #include <cstddef>
 #include <type_traits>
 #include <initializer_list>
@@ -111,13 +115,27 @@ namespace boost { void throw_exception(std::exception const&); }
 #endif
 
 #ifdef _USE_EIGEN
+#if defined(_MSC_VER)
+#pragma warning (push)
+#pragma warning (disable : 4244) // 'argument': conversion from '__int64' to 'int', possible loss of data
+#endif
 #include <Eigen/Core>
 #include <Eigen/Dense>
 #include <Eigen/Sparse>
-#include <Eigen/SVD>
 #include <Eigen/Geometry>
+#include <Eigen/Eigenvalues>
+#include <Eigen/SVD>
+#include <Eigen/QR>
+#include <Eigen/LU>
+#if defined(_MSC_VER)
+#pragma warning (pop)
+#endif
 #endif
 
+#pragma push_macro("free")
+#undef free
+#pragma push_macro("DEBUG")
+#undef DEBUG
 #include <opencv2/core/version.hpp>
 #if CV_MAJOR_VERSION > 2 || CV_MINOR_VERSION > 3
 #include <opencv2/opencv_modules.hpp>
@@ -131,6 +149,8 @@ namespace cv { namespace gpu = cuda; }
 #include <opencv2/gpu/gpu.hpp>
 #endif
 #endif
+#pragma pop_macro("DEBUG")
+#pragma pop_macro("free")
 
 #ifdef _USE_SSE
 #include <xmmintrin.h>
@@ -220,7 +240,7 @@ typedef signed int			INT;
 typedef unsigned int		UINT;
 typedef long				LONG;
 
-typedef LONG				HRESULT;
+typedef int32_t				HRESULT;
 
 typedef CHAR*				LPSTR;
 typedef const CHAR*			LPCSTR;
@@ -306,11 +326,14 @@ typedef int64_t     		size_f_t;
 #endif
 
 #ifndef MINF
-#define MINF			(std::min)
+#define MINF			std::min
 #endif
 #ifndef MAXF
-#define MAXF			(std::max)
+#define MAXF			std::max
 #endif
+
+namespace SEACAVE {
+
 template<typename T>
 inline T MINF3(const T& x1, const T& x2, const T& x3) {
 	return MINF(MINF(x1, x2), x3);
@@ -321,10 +344,27 @@ inline T MAXF3(const T& x1, const T& x2, const T& x3) {
 }
 
 #ifndef RAND
-#define RAND			::rand
+#define RAND			std::rand
 #endif
 template<typename T>
 FORCEINLINE T RANDOM() { return (T(1)/RAND_MAX)*RAND(); }
+
+template<typename T1, typename T2>
+union TAliasCast
+{
+	T1 f;
+	T2 i;
+	inline TAliasCast() {}
+	inline TAliasCast(T1 v) : f(v) {}
+	inline TAliasCast(T2 v) : i(v) {}
+	inline TAliasCast& operator = (T1 v) { f = v; return *this; }
+	inline TAliasCast& operator = (T2 v) { i = v; return *this; }
+	inline operator T1 () const { return f; }
+};
+typedef TAliasCast<float,int32_t> CastF2I;
+typedef TAliasCast<double,int32_t> CastD2I;
+
+} // namespace SEACAVE
 
 #if defined(_MSC_VER)
 # define __LITTLE_ENDIAN 0
@@ -354,7 +394,6 @@ FORCEINLINE T RANDOM() { return (T(1)/RAND_MAX)*RAND(); }
 #include "File.h"
 #include "MemFile.h"
 #include "LinkLib.h"
-#include "HalfFloat.h"
 
 namespace SEACAVE {
 
@@ -628,10 +667,10 @@ inline int log2i(int val) {
 	}
 	return ret;
 }
-template <int N> inline int log2i() { return 1+log2i<(N>>1)>(); }
-template <> inline int log2i<0>() { return -1; }
-template <> inline int log2i<1>() { return 0; }
-template <> inline int log2i<2>() { return 1; }
+template <int N> constexpr inline int log2i() { return 1+log2i<(N>>1)>(); }
+template <>   constexpr inline int log2i<0>() { return -1; }
+template <>   constexpr inline int log2i<1>() { return 0; }
+template <>   constexpr inline int log2i<2>() { return 1; }
 
 template<typename T>
 inline T arithmeticSeries(T n, T a1=1, T d=1) {
@@ -1114,75 +1153,6 @@ inline void sse_prefetch(const void* p) {_mm_prefetch((const char*)p, _MM_HINT_N
 
 // C L A S S E S ///////////////////////////////////////////////////
 
-#define FLOOR_FIX	68719476736.0 * 1.5
-#define BIAS		(ForI((int)(((23 + 127) << 23) + (1 << 22))))
-class GENERAL_API Float
-{
-public:
-	struct GENERAL_API ForI
-	{
-		union
-		{
-			float	f;
-			int		i;
-		};
-
-		inline ForI() {}
-		inline explicit ForI(float val)	: f(val) {}
-		inline explicit ForI(int val)	: i(val) {}
-	} v;
-
-	//---------------------------------------
-
-	static const Float  ZERO;   // ( 0)
-	static const Float  ONE;    // ( 1)
-	static const Float nONE;    // (-1)
-	static const Float  INFINIT;// ( 1.#INF)
-	static const Float nINFINIT;// (-1.#INF)
-
-	//---------------------------------------
-
-	inline Float() {}
-	inline Float(float f) : v(f) {}
-
-	inline float	Abs() const						{ return ForI(v.i & 0x7FFFFFFF).f; }
-	inline float	Clamp(float l, float h) const	{ return (v.f < l) ? l : ((v.f > h) ? h : v.f); }
-	inline bool		IsZero() const					{ return Abs() < FZERO_TOLERANCE; }
-	inline bool		IsEqual(float f) const			{ return Float(f - v.f).Abs() < FZERO_TOLERANCE; }
-	inline bool		IsNegative() const				{ return (v.i & 0x80000000) != 0; }
-	inline bool		IsPositive() const				{ return (v.i & 0x80000000) == 0; }
-
-	//TODO: these functions give wrong result on some machines/compilation settings
-	inline int		Floor2Int() const				{ const double d((double)v.f + FLOOR_FIX); return (*(int*)&d) >> 16; }
-	inline float	Floor() const					{ return (float)Floor2Int(); }
-
-	inline int		Ceil2Int() const				{ const double d((double)v.f + 1.0 + FLOOR_FIX); return (*(int*)&d) >> 16; }
-	inline float	Ceil() const					{ return (float)Ceil2Int(); }
-
-	inline int		Round2Int() const				{ return ForI(v.f + BIAS.f).i - BIAS.i; }
-	inline float	Round() const					{ return (float)Round2Int(); }
-
-	inline float	Fract() const					{ return v.f - Floor(); }
-
-	inline float	Sqrt() const					{ return sqrtf(v.f); }
-	inline float	InvSqrt() const					{ return RSQRT(v.f); }
-
-	inline			operator float() const			{ return v.f; }
-	inline void		operator+=(float r)				{ v.f += r; }
-	inline void		operator-=(float r)				{ v.f -= r; }
-	inline void		operator*=(float r)				{ v.f *= r; }
-	inline void		operator/=(float r)				{ v.f /= r; }
-	inline void		operator =(float r)				{ v.f = r; }
-	inline bool		operator==(float r)				{ return v.f == r; }
-	inline bool		operator!=(float r)				{ return v.f != r; }
-	inline bool		operator <(float r)				{ return v.f < r; }
-	inline bool		operator >(float r)				{ return v.f > r; }
-};
-#undef FLOOR_FIX
-#undef BIAS
-/*----------------------------------------------------------------*/
-
-
 inline bool   ISINFORNAN(float x)			{ return (std::isinf(x) || std::isnan(x)); }
 inline bool   ISINFORNAN(double x)			{ return (std::isinf(x) || std::isnan(x)); }
 inline bool   ISFINITE(float x)				{ return (!std::isinf(x) && !std::isnan(x)); }
@@ -1201,10 +1171,8 @@ inline _Tp    CLAMPS(_Tp v, _Tp c0, _Tp c1)	{ if (c0 <= c1) return CLAMP(v, c0, 
 template<typename _Tp>
 inline _Tp    SIGN(_Tp x)					{ if (x > _Tp(0)) return _Tp(1); if (x < _Tp(0)) return _Tp(-1); return _Tp(0); }
 
-inline float  ABS(float  x)					{ return Float(x).Abs(); }
-inline double ABS(double x)					{ return fabs(x); }
 template<typename _Tp>
-inline _Tp    ABS(_Tp    x)					{ return x < _Tp(0) ? -x : x; }
+inline _Tp    ABS(_Tp    x)					{ return std::abs(x); }
 
 template<typename _Tp>
 inline _Tp    ZEROTOLERANCE()				{ return _Tp(0); }
@@ -1220,10 +1188,10 @@ inline float  EPSILONTOLERANCE()			{ return 0.00001f; }
 template<>
 inline double EPSILONTOLERANCE()			{ return 1e-10; }
 
-inline bool   ISZERO(float  x)				{ return Float(x).IsZero(); }
+inline bool   ISZERO(float  x)				{ return ABS(x) < FZERO_TOLERANCE; }
 inline bool   ISZERO(double x)				{ return ABS(x) < ZERO_TOLERANCE; }
 
-inline bool   ISEQUAL(float  x, float  v)	{ return Float(x).IsEqual(v); }
+inline bool   ISEQUAL(float  x, float  v)	{ return ABS(x-v) < FZERO_TOLERANCE; }
 inline bool   ISEQUAL(double x, double v)	{ return ABS(x-v) < ZERO_TOLERANCE; }
 
 inline float  INVZERO(float)				{ return FINV_ZERO; }
@@ -1238,6 +1206,13 @@ template<typename _Tp>
 inline _Tp    SAFEDIVIDE(_Tp   x, _Tp   y)	{ return (y==_Tp(0) ? INVZERO(y) : x/y); }
 /*----------------------------------------------------------------*/
 
+} // namespace SEACAVE
+
+
+#include "HalfFloat.h"
+
+
+namespace SEACAVE {
 
 // P R O T O T Y P E S /////////////////////////////////////////////
 
@@ -1246,7 +1221,7 @@ typedef double REAL;
 template <typename TYPE, int m, int n> class TMatrix;
 template <typename TYPE, int DIMS> class TAABB;
 template <typename TYPE, int DIMS> class TRay;
-template <typename TYPE> class TPlane;
+template <typename TYPE, int DIMS> class TPlane;
 
 // 2D point struct
 template <typename TYPE>
@@ -1451,7 +1426,7 @@ public:
 
 	using Base::val;
 
-	static const int elems = m*n;
+	enum { elems = m*n };
 
 	static const TMatrix ZERO;
 	static const TMatrix IDENTITY;
@@ -2145,8 +2120,8 @@ public:
 		inline Index(size_t _idx, Type _flag) : idx(_idx), flag(_flag) {}
 	};
 
-	static const int numBitsPerCell = sizeof(Type)*8;
-	static const int numBitsShift;
+	enum { numBitsPerCell = sizeof(Type)*8 };
+	enum { numBitsShift = log2i<TBitMatrix::numBitsPerCell>() };
 
 public:
 	inline TBitMatrix() : data(NULL) {}

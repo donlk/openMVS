@@ -83,6 +83,8 @@ _AccTp normL2Sqr(const _Tp* a, int n)
 	return s;
 }
 #endif
+
+#if CV_MINOR_VERSION < 4 || CV_SUBMINOR_VERSION < 11
 // Convenience creation functions. In the far future, there may be variadic templates here.
 template<typename T>
 Ptr<T> makePtr()
@@ -139,6 +141,7 @@ Ptr<T> makePtr(const A1& a1, const A2& a2, const A3& a3, const A4& a4, const A5&
 {
 	return Ptr<T>(new T(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10));
 }
+#endif
 
 // property implementation macros
 #define CV_IMPL_PROPERTY_RO(type, name, member) \
@@ -1628,7 +1631,7 @@ inline bool TMatrix<TYPE,m,n>::IsEqual(const Base& rhs, TYPE eps) const
 template <typename TYPE, int m, int n>
 inline TMatrix<TYPE,n,n-m> TMatrix<TYPE,m,n>::RightNullSpace(int flags /*= 0*/) const
 {
-	COMPILE_TIME_ASSERT(n > m);
+	STATIC_ASSERT(n > m);
 	const cv::SVD svd(*this, flags|cv::SVD::FULL_UV);
 	// the orthonormal basis of the null space is formed by the columns
 	// of svd.vt such that the corresponding singular values are 0 (n - m or svd.vt.cols - svd.w.rows)
@@ -2647,7 +2650,7 @@ bool TImage<TYPE>::Save(const String& fileName) const
 	if (ext == ".pfm") {
 		if (Base::depth() != CV_32F)
 			return false;
-		Util::ensureDirectory(fileName);
+		Util::ensureFolder(fileName);
 		File fImage(fileName, File::WRITE, File::CREATE | File::TRUNCATE);
 		if (!fImage.isOpen())
 			return false;
@@ -2934,13 +2937,6 @@ void BlurredImageAndDerivatives(const TImage<Type>& in, TImage<Type>& blurred, T
 	BlurredImageAndDerivatives(in, blurred, grad, sigma);
 	cv::merge(dir, 2, grad);
 }
-/*----------------------------------------------------------------*/
-
-
-// C L A S S  //////////////////////////////////////////////////////
-
-template <typename TYPE>
-const int TBitMatrix<TYPE>::numBitsShift = log2i<TBitMatrix::numBitsPerCell>();
 /*----------------------------------------------------------------*/
 
 
@@ -3356,6 +3352,10 @@ namespace boost {
 /*----------------------------------------------------------------*/
 
 // include headers that implement a archive in simple text and binary format or XML format
+#if defined(_MSC_VER)
+#pragma warning (push)
+#pragma warning (disable : 4715) // not all control paths return a value
+#endif
 #include <boost/archive/text_oarchive.hpp>
 #include <boost/archive/text_iarchive.hpp>
 #include <boost/archive/binary_oarchive.hpp>
@@ -3365,8 +3365,12 @@ namespace boost {
 // include headers that implement compressed serialization support
 #include <boost/iostreams/filtering_streambuf.hpp>
 #include <boost/iostreams/filter/zlib.hpp>
+#if defined(_MSC_VER)
+#pragma warning (pop)
+#endif
 
 enum ARCHIVE_TYPE {
+	ARCHIVE_MVS = -1,
 	ARCHIVE_TEXT = 0,
 	ARCHIVE_BINARY,
 	ARCHIVE_BINARY_ZIP,
@@ -3493,7 +3497,7 @@ public:
 		handler(NULL)
 	{
 		if (strDumpPathANSI.IsEmpty())
-			strDumpPathANSI = SEACAVE::Util::getCurrentDirectory();
+			strDumpPathANSI = SEACAVE::Util::getCurrentFolder();
 		const std::wstring strDumpPath(strDumpPathANSI.begin(), strDumpPathANSI.end());
 		const std::wstring strAppName(strAppNameANSI.begin(), strAppNameANSI.end());
 		std::wstring strPipeName;
