@@ -79,7 +79,7 @@ bool Image::ReadImage(IMAGEPTR pImage, Image8U3& image)
 		return false;
 	}
 	image.create(pImage->GetHeight(), pImage->GetWidth());
-	if (FAILED(pImage->ReadData(image.data, PF_R8G8B8, 3, (UINT)image.step))) {
+	if (FAILED(pImage->ReadData(image.data, PF_R8G8B8, 3, (CImage::Size)image.step))) {
 		LOG("error: failed loading image data");
 		return false;
 	}
@@ -142,7 +142,7 @@ float Image::ResizeImage(unsigned nMaxResolution)
 		width = image.width();
 		height = image.height();
 	}
-	if (nMaxResolution == 0 || (width <= nMaxResolution && height <= nMaxResolution))
+	if (nMaxResolution == 0 || MAXF(width,height) <= nMaxResolution)
 		return 1.f;
 	float scale;
 	if (width > height) {
@@ -155,32 +155,21 @@ float Image::ResizeImage(unsigned nMaxResolution)
 		height = nMaxResolution;
 	}
 	if (!image.empty())
-		cv::resize(image, image, cv::Size((int)width, (int)height), 0, 0, cv::INTER_LINEAR);
+		cv::resize(image, image, cv::Size((int)width, (int)height), 0, 0, cv::INTER_AREA);
 	return scale;
 } // ResizeImage
 /*----------------------------------------------------------------*/
 
-// compute image scale for a given max and min resolution
-unsigned Image::ComputeMaxResolution(unsigned& level, unsigned minImageSize) const
-{
-	const unsigned maxImageSize = MAXF(width, height);
-	return Image8U3::computeMaxResolution(maxImageSize, level, minImageSize);
-} // ComputeMaxResolution
-/*----------------------------------------------------------------*/
-
 // compute image scale for a given max and min resolution, using the current image file data
-unsigned Image::RecomputeMaxResolution(unsigned& level, unsigned minImageSize) const
+unsigned Image::RecomputeMaxResolution(unsigned& level, unsigned minImageSize, unsigned maxImageSize) const
 {
 	IMAGEPTR pImage(ReadImageHeader(name));
-	unsigned maxImageSize;
 	if (pImage == NULL) {
 		// something went wrong, use the current known size (however it will most probably fail later)
-		maxImageSize = MAXF(width, height);
-	} else {
-		// re-compute max image size
-		maxImageSize = MAXF(pImage->GetWidth(), pImage->GetHeight());
+		return Image8U3::computeMaxResolution(width, height, level, minImageSize, maxImageSize);
 	}
-	return Image8U3::computeMaxResolution(maxImageSize, level, minImageSize);
+	// re-compute max image size
+	return Image8U3::computeMaxResolution(pImage->GetWidth(), pImage->GetHeight(), level, minImageSize, maxImageSize);
 } // RecomputeMaxResolution
 /*----------------------------------------------------------------*/
 
@@ -206,4 +195,17 @@ void Image::UpdateCamera(const PlatformArr& platforms)
 {
 	camera = GetCamera(platforms, Image8U::Size(width, height));
 } // UpdateCamera
+// computes camera's field of view for the given direction
+REAL Image::ComputeFOV(int dir) const
+{
+	switch (dir) {
+	case 0: // width
+		return 2*ATAN(REAL(width)/(camera.K(0,0)*2));
+	case 1: // height
+		return 2*ATAN(REAL(height)/(camera.K(1,1)*2));
+	case 2: // diagonal
+		return 2*ATAN(SQRT(REAL(SQUARE(width)+SQUARE(height)))/(camera.K(0,0)+camera.K(1,1)));
+	}
+	return 0;
+} // ComputeFOV
 /*----------------------------------------------------------------*/

@@ -279,7 +279,46 @@ bool Scene::SaveInterface(const String & fileName) const
 } // SaveInterface
 /*----------------------------------------------------------------*/
 
-bool Scene::Load(const String& fileName)
+// try to load known point-cloud or mesh files
+bool Scene::Import(const String& fileName)
+{
+	const String ext(Util::getFileExt(fileName).ToLower());
+	if (ext == _T(".obj")) {
+		// import mesh from obj file
+		Release();
+		return mesh.Load(fileName);
+	}
+	if (ext == _T(".ply")) {
+		// import point-cloud/mesh from ply file
+		Release();
+		int nVertices(0), nFaces(0);
+		{
+		PLY ply;
+		if (!ply.read(fileName)) {
+			DEBUG_EXTRA("error: invalid PLY file");
+			return false;
+		}
+		for (int i = 0; i < (int)ply.elems.size(); ++i) {
+			int elem_count;
+			LPCSTR elem_name = ply.setup_element_read(i, &elem_count);
+			if (PLY::equal_strings("vertex", elem_name)) {
+				nVertices = elem_count;
+			} else
+			if (PLY::equal_strings("face", elem_name)) {
+				nFaces = elem_count;
+			}
+		}
+		}
+		if (nVertices && nFaces)
+			return mesh.Load(fileName);
+		if (nVertices)
+			return pointcloud.Load(fileName);
+	}
+	return false;
+} // Import
+/*----------------------------------------------------------------*/
+
+bool Scene::Load(const String& fileName, bool bImport)
 {
 	TD_TIMER_STARTD();
 	Release();
@@ -294,6 +333,8 @@ bool Scene::Load(const String& fileName)
 	fs.read(szHeader, 4);
 	if (!fs || _tcsncmp(szHeader, PROJECT_ID, 4) != 0) {
 		fs.close();
+		if (bImport && Import(fileName))
+			return true;
 		if (LoadInterface(fileName))
 			return true;
 		VERBOSE("error: invalid project");
@@ -381,9 +422,13 @@ bool Scene::Save(const String& fileName, ARCHIVE_TYPE type) const
 
 
 inline float Footprint(const Camera& camera, const Point3f& X) {
+	#if 0
 	const REAL fSphereRadius(1);
 	const Point3 cX(camera.TransformPointW2C(Cast<REAL>(X)));
 	return (float)norm(camera.TransformPointC2I(Point3(cX.x+fSphereRadius,cX.y,cX.z))-camera.TransformPointC2I(cX))+std::numeric_limits<float>::epsilon();
+	#else
+	return (float)(camera.GetFocalLength()/camera.PointDepth(Cast<REAL>(X)));
+	#endif
 }
 
 // compute visibility for the reference image
@@ -431,10 +476,10 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 				continue;
 			const Image& imageData2 = images[view];
 			const Point3f V2(imageData2.camera.C - Cast<REAL>(point));
-			const float footprint2(Footprint(imageData2.camera, point));
 			const float fAngle(ACOS(ComputeAngle<float,float>(V1.ptr(), V2.ptr())));
-			const float fScaleRatio(footprint1/footprint2);
 			const float wAngle(MINF(POW(fAngle/fOptimAngle, 1.5f), 1.f));
+			const float footprint2(Footprint(imageData2.camera, point));
+			const float fScaleRatio(footprint1/footprint2);
 			float wScale;
 			if (fScaleRatio > 1.6f)
 				wScale = SQUARE(1.6f/fScaleRatio);
@@ -462,7 +507,6 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 		if (score.points == 0)
 			continue;
 		ASSERT(ID != IDB);
-		ViewScore& neighbor = neighbors.AddEmpty();
 		// compute how well the matched features are spread out (image covered area)
 		const Point2f boundsA(imageData.GetSize());
 		const Point2f boundsB(imageDataB.GetSize());
@@ -482,11 +526,14 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 			}
 		}
 		ASSERT(pointsA.GetSize() == pointsB.GetSize() && pointsA.GetSize() <= score.points);
+		if (pointsA.IsEmpty())
+			continue;
 		const float areaA(ComputeCoveredArea<float, 2, 16, false>((const float*)pointsA.Begin(), pointsA.GetSize(), boundsA.ptr()));
 		const float areaB(ComputeCoveredArea<float, 2, 16, false>((const float*)pointsB.Begin(), pointsB.GetSize(), boundsB.ptr()));
 		const float area(MINF(areaA, areaB));
 		pointsA.Empty(); pointsB.Empty();
 		// store image score
+		ViewScore& neighbor = neighbors.AddEmpty();
 		neighbor.idx.ID = IDB;
 		neighbor.idx.points = score.points;
 		neighbor.idx.scale = score.avgScale/score.points;
@@ -546,14 +593,16 @@ bool Scene::ExportCamerasMLP(const String& fileName, const String& fileNameScene
 		"   </MLMatrix44>\n"
 		"  </MLMesh>\n"
 		" </MeshGroup>\n";
-	static const char mlp_raster[] =
+	static const char mlp_raster_pos[] =
 		"  <MLRaster label=\"%s\">\n"
-		"   <VCGCamera TranslationVector=\"%0.6g %0.6g %0.6g 1\""
+		"   <VCGCamera TranslationVector=\"%0.6g %0.6g %0.6g 1\"";
+	static const char mlp_raster_cam[] =
 		" LensDistortion=\"%0.6g %0.6g\""
 		" ViewportPx=\"%u %u\""
 		" PixelSizeMm=\"1 %0.4f\""
 		" FocalMm=\"%0.4f\""
-		" CenterPx=\"%0.4f %0.4f\""
+		" CenterPx=\"%0.4f %0.4f\"";
+	static const char mlp_raster_rot[] =
 		" RotationMatrix=\"%0.6g %0.6g %0.6g 0 %0.6g %0.6g %0.6g 0 %0.6g %0.6g %0.6g 0 0 0 0 1\"/>\n"
 		"   <Plane semantic=\"\" fileName=\"%s\"/>\n"
 		"  </MLRaster>\n";
@@ -572,13 +621,17 @@ bool Scene::ExportCamerasMLP(const String& fileName, const String& fileNameScene
 		if (!imageData.IsValid())
 			continue;
 		const Camera& camera = imageData.camera;
-		f.print(mlp_raster,
+		f.print(mlp_raster_pos,
 			Util::getFileName(imageData.name).c_str(),
-			-camera.C.x, -camera.C.y, -camera.C.z,
+			-camera.C.x, -camera.C.y, -camera.C.z
+		);
+		f.print(mlp_raster_cam,
 			0, 0,
 			imageData.width, imageData.height,
 			camera.K(1,1)/camera.K(0,0), camera.K(0,0),
-			camera.K(0,2), camera.K(1,2),
+			camera.K(0,2), camera.K(1,2)
+		);
+		f.print(mlp_raster_rot,
 			 camera.R(0,0),  camera.R(0,1),  camera.R(0,2),
 			-camera.R(1,0), -camera.R(1,1), -camera.R(1,2),
 			-camera.R(2,0), -camera.R(2,1), -camera.R(2,2),

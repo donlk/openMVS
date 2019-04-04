@@ -38,7 +38,7 @@ typedef struct CPUINFO_TYP {
 	bool bSSE41;      // Streaming SIMD Extensions 4.1
 	bool bSSE42;      // Streaming SIMD Extensions 4.2
 	bool bAVX;        // Advanced Vector Extensions
-	bool bFMA;        // Fused Multiply–Add
+	bool bFMA;        // Fused Multiplyï¿½Add
 	bool b3DNOW;      // 3DNow! (vendor independent)
 	bool b3DNOWEX;    // 3DNow! (AMD specific extensions)
 	bool bMMX;        // MMX support
@@ -556,7 +556,7 @@ bool OSSupportsAVX()
 {
 	#ifndef _WIN64
 	// try AVX instruction
-	UINT flag;
+	unsigned flag;
 	_asm {
 		mov ecx, 0; //specify 0 for XFEATURE_ENABLED_MASK register
 		XGETBV; //result in EDX:EAX
@@ -616,7 +616,7 @@ void Util::LogBuild()
 	#else
 	LOG(_T("Build date: ") __DATE__ _T(", ") __TIME__);
 	#endif
-	LOG((_T("CPU: ") + Util::GetCPUInfo()).c_str());
+	LOG(_T("CPU: %s (%u cores)"), Util::GetCPUInfo().c_str(), Thread::hardwareConcurrency());
 	LOG((_T("RAM: ") + Util::GetRAMInfo()).c_str());
 	LOG((_T("OS: ") + Util::GetOSInfo()).c_str());
 	if (!SIMD_ENABLED.isSet(Util::SSE)) LOG(_T("warning: no SSE compatible CPU or OS detected"));
