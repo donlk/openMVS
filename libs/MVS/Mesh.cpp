@@ -1459,7 +1459,7 @@ bool Mesh::SavePLY(const String& fileName, const cList<String>& comments, bool b
 	// export texture file name as comment if needed
 	String textureFileName;
 	if (!faceTexcoords.IsEmpty() && !textureDiffuse.empty()) {
-		textureFileName = Util::getFileFullName(fileName)+_T(".png");
+		textureFileName = Util::getFileFullName(fileName)+_T(".jpg");
 		ply.append_comment((_T("TextureFile ")+Util::getFileNameExt(textureFileName)).c_str());
 	}
 
