@@ -12,9 +12,9 @@ CMAKE_MINIMUM_REQUIRED(VERSION 3.1.0)
 # ${OpenMVS_BINARY_DIR}.
 PROJECT(OpenMVS)
 
-set(OpenMVS_MAJOR_VERSION 0)
-set(OpenMVS_MINOR_VERSION 7)
-set(OpenMVS_PATCH_VERSION 0)
+set(OpenMVS_MAJOR_VERSION 1)
+set(OpenMVS_MINOR_VERSION 0)
+set(OpenMVS_PATCH_VERSION 1)
 set(OpenMVS_VERSION ${OpenMVS_MAJOR_VERSION}.${OpenMVS_MINOR_VERSION}.${OpenMVS_PATCH_VERSION})
 
 # Find dependencies:
@@ -41,7 +41,6 @@ ConfigLibrary()
 
 # List configuration options
 SET(OpenMVS_USE_NONFREE ON CACHE BOOL "Build non-free (patented) functionality")
-SET(OpenMVS_USE_EXIV2 OFF CACHE BOOL "Link and use EXIV2 library")
 SET(OpenMVS_USE_CERES OFF CACHE BOOL "Enable CERES optimization library")
 SET(OpenMVS_USE_FAST_FLOAT2INT ON CACHE BOOL "Use an optimized code to convert real numbers to int")
 SET(OpenMVS_USE_FAST_INVSQRT OFF CACHE BOOL "Use an optimized code to compute the inverse square root (slower in fact on modern compilers)")
@@ -56,12 +55,20 @@ SET(OpenMVS_CONFIG_INCLUDE_DIR "${CMAKE_BINARY_DIR}/" CACHE PATH "Where to creat
 INCLUDE_DIRECTORIES("${OpenMVS_SOURCE_DIR}")
 
 # Find required packages
+SET(OpenMVS_EXTRA_LIBS "")
 if(OpenMVS_USE_OPENMP)
+	SET(OpenMP_LIBS "")
 	FIND_PACKAGE(OpenMP)
 	if(OPENMP_FOUND)
 		SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
 		ADD_DEFINITIONS(-D_USE_OPENMP)
 		SET(_USE_OPENMP TRUE)
+		#cmake only check for separate OpenMP library on AppleClang 7+
+		#https://github.com/Kitware/CMake/blob/42212f7539040139ecec092547b7d58ef12a4d72/Modules/FindOpenMP.cmake#L252
+		if (CMAKE_CXX_COMPILER_ID MATCHES "AppleClang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "7.0")
+			SET(OpenMP_LIBS ${OpenMP_libomp_LIBRARY})
+			LIST(APPEND OpenMVS_EXTRA_LIBS ${OpenMP_LIBS})
+		endif()
 	else()
 		message("-- Can't find OpenMP. Continuing without it.")
 	endif()
@@ -98,6 +105,7 @@ if(OpenMVS_USE_BREAKPAD)
 		INCLUDE_DIRECTORIES(${BREAKPAD_INCLUDE_DIRS})
 		ADD_DEFINITIONS(${BREAKPAD_DEFINITIONS} -D_USE_BREAKPAD)
 		SET(_USE_BREAKPAD TRUE)
+		LIST(APPEND OpenMVS_EXTRA_LIBS ${BREAKPAD_LIBS})
 	else()
 		MESSAGE("-- Can't find BreakPad. Continuing without it.")
 	endif()

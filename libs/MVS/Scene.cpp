@@ -71,34 +71,34 @@ bool Scene::LoadInterface(const String & fileName)
 	// import platforms and cameras
 	ASSERT(!obj.platforms.empty());
 	platforms.Reserve((uint32_t)obj.platforms.size());
-	for (Interface::PlatformArr::const_iterator itPlatform=obj.platforms.begin(); itPlatform!=obj.platforms.end(); ++itPlatform) {
+	for (const Interface::Platform& itPlatform: obj.platforms) {
 		Platform& platform = platforms.AddEmpty();
-		platform.name = itPlatform->name;
-		platform.cameras.Reserve((uint32_t)itPlatform->cameras.size());
-		for (Interface::Platform::CameraArr::const_iterator itCamera=itPlatform->cameras.begin(); itCamera!=itPlatform->cameras.end(); ++itCamera) {
+		platform.name = itPlatform.name;
+		platform.cameras.Reserve((uint32_t)itPlatform.cameras.size());
+		for (const Interface::Platform::Camera& itCamera: itPlatform.cameras) {
 			Platform::Camera& camera = platform.cameras.AddEmpty();
-			camera.K = itCamera->K;
-			camera.R = itCamera->R;
-			camera.C = itCamera->C;
-			if (!itCamera->IsNormalized()) {
+			camera.K = itCamera.K;
+			camera.R = itCamera.R;
+			camera.C = itCamera.C;
+			if (!itCamera.IsNormalized()) {
 				// normalize K
-				ASSERT(itCamera->HasResolution());
-				const REAL scale(REAL(1)/camera.GetNormalizationScale(itCamera->width,itCamera->height));
+				ASSERT(itCamera.HasResolution());
+				const REAL scale(REAL(1)/camera.GetNormalizationScale(itCamera.width,itCamera.height));
 				camera.K(0,0) *= scale;
 				camera.K(1,1) *= scale;
 				camera.K(0,2) *= scale;
 				camera.K(1,2) *= scale;
 			}
-			DEBUG_EXTRA("Camera model loaded: platform %u; camera %2u; f %.3fx%.3f; poses %u", platforms.GetSize()-1, platform.cameras.GetSize()-1, camera.K(0,0), camera.K(1,1), itPlatform->poses.size());
+			DEBUG_EXTRA("Camera model loaded: platform %u; camera %2u; f %.3fx%.3f; poses %u", platforms.size()-1, platform.cameras.size()-1, camera.K(0,0), camera.K(1,1), itPlatform.poses.size());
 		}
-		ASSERT(platform.cameras.GetSize() == itPlatform->cameras.size());
-		platform.poses.Reserve((uint32_t)itPlatform->poses.size());
-		for (Interface::Platform::PoseArr::const_iterator itPose=itPlatform->poses.begin(); itPose!=itPlatform->poses.end(); ++itPose) {
+		ASSERT(platform.cameras.GetSize() == itPlatform.cameras.size());
+		platform.poses.Reserve((uint32_t)itPlatform.poses.size());
+		for (const Interface::Platform::Pose& itPose: itPlatform.poses) {
 			Platform::Pose& pose = platform.poses.AddEmpty();
-			pose.R = itPose->R;
-			pose.C = itPose->C;
+			pose.R = itPose.R;
+			pose.C = itPose.C;
 		}
-		ASSERT(platform.poses.GetSize() == itPlatform->poses.size());
+		ASSERT(platform.poses.GetSize() == itPlatform.poses.size());
 	}
 	ASSERT(platforms.GetSize() == obj.platforms.size());
 	if (platforms.IsEmpty())
@@ -109,9 +109,8 @@ bool Scene::LoadInterface(const String & fileName)
 	size_t nTotalPixels(0);
 	ASSERT(!obj.images.empty());
 	images.Reserve((uint32_t)obj.images.size());
-	for (Interface::ImageArr::const_iterator it=obj.images.begin(); it!=obj.images.end(); ++it) {
-		const Interface::Image& image = *it;
-		const uint32_t ID(images.GetSize());
+	for (const Interface::Image& image: obj.images) {
+		const uint32_t ID(images.size());
 		Image& imageData = images.AddEmpty();
 		imageData.name = image.name;
 		Util::ensureUnifySlash(imageData.name);
@@ -123,6 +122,7 @@ bool Scene::LoadInterface(const String & fileName)
 		}
 		imageData.platformID = image.platformID;
 		imageData.cameraID = image.cameraID;
+		imageData.ID = (image.ID == NO_ID ? ID : image.ID);
 		// init camera
 		const Interface::Platform::Camera& camera = obj.platforms[image.platformID].cameras[image.cameraID];
 		if (camera.HasResolution()) {
@@ -192,19 +192,17 @@ bool Scene::LoadInterface(const String & fileName)
 	return true;
 } // LoadInterface
 
-bool Scene::SaveInterface(const String & fileName) const
+bool Scene::SaveInterface(const String & fileName, int version) const
 {
 	TD_TIMER_STARTD();
 	Interface obj;
 
 	// export platforms
 	obj.platforms.reserve(platforms.GetSize());
-	FOREACH(i, platforms) {
-		const Platform& platform = platforms[i];
+	for (const Platform& platform: platforms) {
 		Interface::Platform plat;
 		plat.cameras.reserve(platform.cameras.GetSize());
-		FOREACH(j, platform.cameras) {
-			const Platform::Camera& camera = platform.cameras[j];
+		for (const Platform::Camera& camera: platform.cameras) {
 			Interface::Platform::Camera cam;
 			cam.K = camera.K;
 			cam.R = camera.R;
@@ -212,8 +210,7 @@ bool Scene::SaveInterface(const String & fileName) const
 			plat.cameras.push_back(cam);
 		}
 		plat.poses.reserve(platform.poses.GetSize());
-		FOREACH(j, platform.poses) {
-			const Platform::Pose& pose = platform.poses[j];
+		for (const Platform::Pose& pose: platform.poses) {
 			Interface::Platform::Pose p;
 			p.R = pose.R;
 			p.C = pose.C;
@@ -231,6 +228,7 @@ bool Scene::SaveInterface(const String & fileName) const
 		image.poseID = imageData.poseID;
 		image.platformID = imageData.platformID;
 		image.cameraID = imageData.cameraID;
+		image.ID = imageData.ID;
 	}
 
 	// export 3D points
@@ -256,7 +254,7 @@ bool Scene::SaveInterface(const String & fileName) const
 			vertexNormal.n = normal;
 		}
 	}
-	if (!pointcloud.normals.IsEmpty()) {
+	if (!pointcloud.colors.IsEmpty()) {
 		obj.verticesColor.resize(pointcloud.colors.GetSize());
 		FOREACH(i, pointcloud.colors) {
 			const PointCloud::Color& color = pointcloud.colors[i];
@@ -266,7 +264,7 @@ bool Scene::SaveInterface(const String & fileName) const
 	}
 
 	// serialize out the current state
-	if (!ARCHIVE::SerializeSave(obj, fileName))
+	if (!ARCHIVE::SerializeSave(obj, fileName, version>=0?uint32_t(version):MVSI_PROJECT_VER))
 		return false;
 
 	DEBUG_EXTRA("Scene saved to interface format (%s):\n"
@@ -427,7 +425,7 @@ inline float Footprint(const Camera& camera, const Point3f& X) {
 	const Point3 cX(camera.TransformPointW2C(Cast<REAL>(X)));
 	return (float)norm(camera.TransformPointC2I(Point3(cX.x+fSphereRadius,cX.y,cX.z))-camera.TransformPointC2I(cX))+std::numeric_limits<float>::epsilon();
 	#else
-	return (float)(camera.GetFocalLength()/camera.PointDepth(Cast<REAL>(X)));
+	return (float)(camera.GetFocalLength()/camera.PointDepth(X));
 	#endif
 }
 
@@ -470,8 +468,7 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 		// score shared views
 		const Point3f V1(imageData.camera.C - Cast<REAL>(point));
 		const float footprint1(Footprint(imageData.camera, point));
-		FOREACHPTR(pView, views) {
-			const PointCloud::View& view = *pView;
+		for (const PointCloud::View& view: views) {
 			if (view == ID)
 				continue;
 			const Image& imageData2 = images[view];
@@ -498,40 +495,36 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 	ASSERT(nPoints > 3);
 
 	// select best neighborViews
-	Point2fArr pointsA(0, points.GetSize()), pointsB(0, points.GetSize());
+	Point2fArr projs(0, points.GetSize());
 	FOREACH(IDB, images) {
 		const Image& imageDataB = images[IDB];
 		if (!imageDataB.IsValid())
 			continue;
 		const Score& score = scores[IDB];
-		if (score.points == 0)
+		if (score.points < 3)
 			continue;
 		ASSERT(ID != IDB);
 		// compute how well the matched features are spread out (image covered area)
 		const Point2f boundsA(imageData.GetSize());
 		const Point2f boundsB(imageDataB.GetSize());
-		ASSERT(pointsA.IsEmpty() && pointsB.IsEmpty());
-		FOREACHPTR(pIdx, points) {
-			const PointCloud::ViewArr& views = pointcloud.pointViews[*pIdx];
+		ASSERT(projs.IsEmpty());
+		for (uint32_t idx: points) {
+			const PointCloud::ViewArr& views = pointcloud.pointViews[idx];
 			ASSERT(views.IsSorted());
 			ASSERT(views.FindFirst(ID) != PointCloud::ViewArr::NO_INDEX);
 			if (views.FindFirst(IDB) == PointCloud::ViewArr::NO_INDEX)
 				continue;
-			const PointCloud::Point& point = pointcloud.points[*pIdx];
-			Point2f& ptA = pointsA.AddConstruct(imageData.camera.ProjectPointP(point));
-			Point2f& ptB = pointsB.AddConstruct(imageDataB.camera.ProjectPointP(point));
-			if (!imageData.camera.IsInside(ptA, boundsA) || !imageDataB.camera.IsInside(ptB, boundsB)) {
-				pointsA.RemoveLast();
-				pointsB.RemoveLast();
-			}
+			const PointCloud::Point& point = pointcloud.points[idx];
+			Point2f& ptA = projs.AddConstruct(imageData.camera.ProjectPointP(point));
+			Point2f ptB = imageDataB.camera.ProjectPointP(point);
+			if (!imageData.camera.IsInside(ptA, boundsA) || !imageDataB.camera.IsInside(ptB, boundsB))
+				projs.RemoveLast();
 		}
-		ASSERT(pointsA.GetSize() == pointsB.GetSize() && pointsA.GetSize() <= score.points);
-		if (pointsA.IsEmpty())
+		ASSERT(projs.GetSize() <= score.points);
+		if (projs.IsEmpty())
 			continue;
-		const float areaA(ComputeCoveredArea<float, 2, 16, false>((const float*)pointsA.Begin(), pointsA.GetSize(), boundsA.ptr()));
-		const float areaB(ComputeCoveredArea<float, 2, 16, false>((const float*)pointsB.Begin(), pointsB.GetSize(), boundsB.ptr()));
-		const float area(MINF(areaA, areaB));
-		pointsA.Empty(); pointsB.Empty();
+		const float area(ComputeCoveredArea<float,2,16,false>((const float*)projs.Begin(), projs.GetSize(), boundsA.ptr()));
+		projs.Empty();
 		// store image score
 		ViewScore& neighbor = neighbors.AddEmpty();
 		neighbor.idx.ID = IDB;

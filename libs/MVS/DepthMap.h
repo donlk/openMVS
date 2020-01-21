@@ -117,7 +117,6 @@ extern unsigned nOptimize;
 extern unsigned nEstimateColors;
 extern unsigned nEstimateNormals;
 extern float fNCCThresholdKeep;
-extern float fNCCThresholdRefine;
 extern unsigned nEstimationIters;
 extern unsigned nRandomIters;
 extern unsigned nRandomMaxScale;
@@ -149,6 +148,13 @@ struct MVS_API DepthData {
 		Camera camera; // camera matrix corresponding to this image
 		Image32F image; // image float intensities
 		Image* pImageData; // image data
+
+		inline IIndex GetID() const {
+			return pImageData->ID;
+		}
+		inline IIndex GetLocalID(const ImageArr& images) const {
+			return (IIndex)(pImageData - images.begin());
+		}
 
 		template <typename IMAGE>
 		static bool ScaleImage(const IMAGE& image, IMAGE& imageScaled, float scale) {
@@ -189,6 +195,9 @@ struct MVS_API DepthData {
 	inline bool IsEmpty() const {
 		return depthMap.empty();
 	}
+
+	const ViewData& GetView() const { return images.front(); }
+	const Camera& GetCamera() const { return GetView().camera; }
 
 	void GetNormal(const ImageRef& ir, Point3f& N, const TImage<Point3f>* pPointMap=NULL) const;
 	void GetNormal(const Point2f& x, Point3f& N, const TImage<Point3f>* pPointMap=NULL) const;
@@ -317,6 +326,7 @@ struct MVS_API DepthEstimator {
 	const MapRefArr& coords;
 	const Image8U::Size size;
 	const Depth dMin, dMax;
+	const Depth dMinSqr, dMaxSqr;
 	const ENDIRECTION dir;
 	#if DENSE_AGGNCC == DENSE_AGGNCC_NTH || DENSE_AGGNCC == DENSE_AGGNCC_MINMEAN
 	const IDX idxScore;
@@ -395,13 +405,13 @@ struct MVS_API DepthEstimator {
 	}
 
 	// generate random depth and normal
-	inline Depth RandomDepth(Depth dMin, Depth dMax) {
-		ASSERT(dMin > 0);
-		return rnd.randomRange(dMin, dMax);
+	inline Depth RandomDepth(Depth dMinSqr, Depth dMaxSqr) {
+		ASSERT(dMinSqr > 0 && dMinSqr < dMaxSqr);
+		return SQUARE(rnd.randomRange(dMinSqr, dMaxSqr));
 	}
 	inline Normal RandomNormal(const Point3f& viewRay) {
 		Normal normal;
-		Dir2Normal(Point2f(rnd.randomRange(FD2R(0.f),FD2R(360.f)), rnd.randomRange(FD2R(120.f),FD2R(180.f))), normal);
+		Dir2Normal(Point2f(rnd.randomRange(FD2R(0.f),FD2R(180.f)), rnd.randomRange(FD2R(90.f),FD2R(180.f))), normal);
 		return normal.dot(viewRay) > 0 ? -normal : normal;
 	}
 
@@ -413,25 +423,13 @@ struct MVS_API DepthEstimator {
 			normal = RMatrixBaseF(normal.cross(viewDir), MINF((ACOS(cosAngLen/norm(viewDir))-FD2R(90.f))*1.01f, -0.001f)) * normal;
 	}
 
-	// encode/decode NCC score and refinement level in one float
-	static inline float EncodeScoreScale(float score, unsigned invScaleRange=0) {
-		ASSERT(score >= 0.f && score <= 2.01f);
-		return score*0.1f+(float)invScaleRange;
-	}
-	static inline unsigned DecodeScoreScale(float& score) {
-		const unsigned invScaleRange((unsigned)FLOOR2INT(score));
-		score = (score-(float)invScaleRange)*10.f;
-		//ASSERT(score >= 0.f && score <= 2.01f); //problems in multi-threading
-		return invScaleRange;
-	}
-
 	static void MapMatrix2ZigzagIdx(const Image8U::Size& size, DepthEstimator::MapRefArr& coords, const BitMatrix& mask, int rawStride=16);
 
 	const float smoothBonusDepth, smoothBonusNormal;
 	const float smoothSigmaDepth, smoothSigmaNormal;
 	const float thMagnitudeSq;
 	const float angle1Range, angle2Range;
-	const float thConfSmall, thConfBig;
+	const float thConfSmall, thConfBig, thConfRand;
 	const float thRobust;
 	#if DENSE_REFINE == DENSE_REFINE_EXACT
 	const float thPerturbation;
@@ -461,6 +459,17 @@ MVS_API bool ExportDepthMap(const String& fileName, const DepthMap& depthMap, De
 MVS_API bool ExportNormalMap(const String& fileName, const NormalMap& normalMap);
 MVS_API bool ExportConfidenceMap(const String& fileName, const ConfidenceMap& confMap);
 MVS_API bool ExportPointCloud(const String& fileName, const Image&, const DepthMap&, const NormalMap&);
+
+MVS_API bool ExportDepthDataRaw(const String&, const String& imageFileName,
+	const IIndexArr&, const cv::Size& imageSize,
+	const KMatrix&, const RMatrix&, const CMatrix&,
+	Depth dMin, Depth dMax,
+	const DepthMap&, const NormalMap&, const ConfidenceMap&);
+MVS_API bool ImportDepthDataRaw(const String&, String& imageFileName,
+	IIndexArr&, cv::Size& imageSize,
+	KMatrix&, RMatrix&, CMatrix&,
+	Depth& dMin, Depth& dMax,
+	DepthMap&, NormalMap&, ConfidenceMap&, unsigned flags=7);
 
 MVS_API void CompareDepthMaps(const DepthMap& depthMap, const DepthMap& depthMapGT, uint32_t idxImage, float threshold=0.01f);
 MVS_API void CompareNormalMaps(const NormalMap& normalMap, const NormalMap& normalMapGT, uint32_t idxImage);

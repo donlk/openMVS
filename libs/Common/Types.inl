@@ -769,13 +769,6 @@ inline TMatrix<TYPE,m,n> cross(const cv::Matx<TYPE,m,n>& l, const cv::Matx<TYPE,
 }
 
 template <typename TYPE>
-struct RealType { typedef REAL type; };
-template <>
-struct RealType<float> { typedef float type; };
-template <>
-struct RealType<double> { typedef double type; };
-
-template <typename TYPE>
 inline typename RealType<TYPE>::type normSq(const cv::Point_<TYPE>& v) {
 	typedef typename RealType<TYPE>::type real;
 	return SQUARE((real)v.x)+SQUARE((real)v.y);
@@ -1524,6 +1517,79 @@ DEFINE_GENERIC_CVDATATYPE(SEACAVE::Image32F4, uint8_t)
 
 namespace SEACAVE {
 
+namespace CONVERT {
+
+// convert sRGB to/from linear value
+// (see http://en.wikipedia.org/wiki/SRGB)
+template <typename T>
+constexpr T sRGB2RGB(T x) {
+	return x <= T(0.04045) ? x * (T(1)/T(12.92)) : POW((x + T(0.055)) * (T(1)/T(1.055)), T(2.4));
+}
+template <typename T>
+constexpr T RGB2sRGB(T x) {
+	return x <= T(0.0031308) ? T(12.92) * x : T(1.055) * POW(x, T(1)/T(2.4)) - T(0.055);
+}
+static const CAutoPtrArr<float> g_ptrsRGB82RGBf([]() {
+	float* const buffer = new float[256];
+	for (int i=0; i<256; ++i)
+		buffer[i] = sRGB2RGB(float(i)/255.f);
+	return buffer;
+}());
+
+// color conversion helper structures
+template <typename TI, typename TO>
+struct NormRGB_t {
+	const TO v;
+	inline NormRGB_t(TI _v) : v(TO(_v)*(TO(1)/TO(255))) {}
+	inline operator TO () const { return v; }
+};
+template <typename TI, typename TO>
+struct RGBUnNorm_t {
+	const TO v;
+	inline RGBUnNorm_t(TI _v) : v(TO(_v)*TO(255)) {}
+	inline operator TO () const { return v; }
+};
+template <typename TI=float, typename TO=uint8_t>
+struct RoundF2U_t {
+	const TO v;
+	inline RoundF2U_t(TI _v) : v(ROUND2INT<TO>(_v)) {}
+	inline operator TO () const { return v; }
+};
+template <typename TI, typename TO>
+struct sRGB2RGB_t {
+	const TO v;
+	inline sRGB2RGB_t(TI _v) : v(sRGB2RGB(TO(_v))) {}
+	inline operator TO () const { return v; }
+};
+template <typename TI, typename TO>
+struct NormsRGB2RGB_t {
+	const TO v;
+	inline NormsRGB2RGB_t(TI _v) : v(sRGB2RGB(TO(_v)*(TO(1)/TO(255)))) {}
+	inline operator TO () const { return v; }
+};
+template <>
+struct NormsRGB2RGB_t<uint8_t,float> {
+	const float v;
+	inline NormsRGB2RGB_t(uint8_t _v) : v(g_ptrsRGB82RGBf[_v]) {}
+	inline operator float () const { return v; }
+};
+template <typename TI, typename TO>
+struct NormsRGB2RGBUnNorm_t {
+	const TO v;
+	inline NormsRGB2RGBUnNorm_t(TI _v) : v(sRGB2RGB(TO(_v)*(TO(1)/TO(255)))*TO(255)) {}
+	inline operator TO () const { return v; }
+};
+template <>
+struct NormsRGB2RGBUnNorm_t<uint8_t,float> {
+	const float v;
+	inline NormsRGB2RGBUnNorm_t(uint8_t _v) : v(g_ptrsRGB82RGBf[_v]*255.f) {}
+	inline operator float () const { return v; }
+};
+
+} // namespace CONVERT
+/*----------------------------------------------------------------*/
+
+
 // C L A S S  //////////////////////////////////////////////////////
 
 template <typename FLT>
@@ -2050,23 +2116,21 @@ INTERTYPE TImage<TYPE>::sample(const SAMPLER& sampler, const TPoint2<typename SA
 // convert color image to gray
 template <typename TYPE>
 template <typename T>
-void TImage<TYPE>::toGray(TImage<T>& out, int code, bool bNormalize) const
+void TImage<TYPE>::toGray(TImage<T>& out, int code, bool bNormalize, bool bSRGB) const
 {
 	#if 1
 	ASSERT(code==cv::COLOR_RGB2GRAY || code==cv::COLOR_RGBA2GRAY || code==cv::COLOR_BGR2GRAY || code==cv::COLOR_BGRA2GRAY);
 	static const T coeffsRGB[] = {T(0.299), T(0.587), T(0.114)};
 	static const T coeffsBGR[] = {T(0.114), T(0.587), T(0.299)};
-	static const T coeffsRGBn[] = {T(0.299/255), T(0.587/255), T(0.114/255)};
-	static const T coeffsBGRn[] = {T(0.114/255), T(0.587/255), T(0.299/255)};
 	const float* coeffs;
 	switch (code) {
 	case cv::COLOR_BGR2GRAY:
 	case cv::COLOR_BGRA2GRAY:
-		coeffs = (bNormalize ? coeffsBGRn : coeffsBGR);
+		coeffs = coeffsBGR;
 		break;
 	case cv::COLOR_RGB2GRAY:
 	case cv::COLOR_RGBA2GRAY:
-		coeffs = (bNormalize ? coeffsRGBn : coeffsRGB);
+		coeffs = coeffsRGB;
 		break;
 	default:
 		ASSERT("Unsupported image format" == NULL);
@@ -2076,12 +2140,30 @@ void TImage<TYPE>::toGray(TImage<T>& out, int code, bool bNormalize) const
 		out.create(rows, cols);
 	ASSERT(cv::Mat::isContinuous());
 	ASSERT(out.cv::Mat::isContinuous());
-	const int scn(cv::Mat::channels());
+	const int scn(this->cv::Mat::channels());
 	T* dst = out.cv::Mat::template ptr<T>();
 	T* const dstEnd = dst + out.area();
 	typedef typename cv::DataType<TYPE>::channel_type ST;
-	for (const ST* src=cv::Mat::template ptr<ST>(); dst!=dstEnd; src+=scn)
-		*dst++ = cb*T(src[0]) + cg*T(src[1]) + cr*T(src[2]);
+	if (bSRGB) {
+		if (bNormalize) {
+			typedef typename CONVERT::NormsRGB2RGB_t<ST,T> ColConv;
+			for (const ST* src=cv::Mat::template ptr<ST>(); dst!=dstEnd; src+=scn)
+				*dst++ = T(cb*ColConv(src[0]) + cg*ColConv(src[1]) + cr*ColConv(src[2]));
+		} else {
+			typedef typename CONVERT::NormsRGB2RGBUnNorm_t<ST,T> ColConv;
+			for (const ST* src=cv::Mat::template ptr<ST>(); dst!=dstEnd; src+=scn)
+				*dst++ = T(cb*ColConv(src[0]) + cg*ColConv(src[1]) + cr*ColConv(src[2]));
+		}
+	} else {
+		if (bNormalize) {
+			typedef typename CONVERT::NormRGB_t<ST,T> ColConv;
+			for (const ST* src=cv::Mat::template ptr<ST>(); dst!=dstEnd; src+=scn)
+				*dst++ = T(cb*ColConv(src[0]) + cg*ColConv(src[1]) + cr*ColConv(src[2]));
+		} else {
+			for (const ST* src=cv::Mat::template ptr<ST>(); dst!=dstEnd; src+=scn)
+				*dst++ = T(cb*src[0] + cg*src[1] + cr*src[2]);
+		}
+	}
 	#else
 	cv::Mat cimg;
 	convertTo(cimg, cv::DataType<real>::type);
@@ -2289,7 +2371,7 @@ inline void _ProcessScanLine(int y, const TPoint3<T>& pa, const TPoint3<T>& pb, 
 	}
 }
 // Raster the given triangle and output the position and depth of each pixel of the triangle;
-// based on "Learning how to write a 3D software engine – Rasterization & Z-Buffering" by Nick (David Rousset)
+// based on "Learning how to write a 3D software engine ï¿½ Rasterization & Z-Buffering" by Nick (David Rousset)
 // http://blogs.msdn.com/b/davrous/archive/2013/06/21/tutorial-part-4-learning-how-to-write-a-3d-software-engine-in-c-ts-or-js-rasterization-amp-z-buffering.aspx
 template <typename TYPE>
 template <typename T, typename PARSER>
