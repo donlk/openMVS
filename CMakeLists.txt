@@ -3,7 +3,13 @@
 ########################################################################
 #
 # Project-wide settings
-CMAKE_MINIMUM_REQUIRED(VERSION 3.1.0)
+CMAKE_MINIMUM_REQUIRED(VERSION 3.8.0)
+if(POLICY CMP0011)
+	cmake_policy(SET CMP0011 NEW)
+endif()
+if(POLICY CMP0074)
+	cmake_policy(SET CMP0074 NEW)
+endif()
 
 # Name of the project.
 #
@@ -13,8 +19,8 @@ CMAKE_MINIMUM_REQUIRED(VERSION 3.1.0)
 PROJECT(OpenMVS)
 
 set(OpenMVS_MAJOR_VERSION 1)
-set(OpenMVS_MINOR_VERSION 0)
-set(OpenMVS_PATCH_VERSION 1)
+set(OpenMVS_MINOR_VERSION 1)
+set(OpenMVS_PATCH_VERSION 0)
 set(OpenMVS_VERSION ${OpenMVS_MAJOR_VERSION}.${OpenMVS_MINOR_VERSION}.${OpenMVS_PATCH_VERSION})
 
 # Find dependencies:
@@ -27,7 +33,6 @@ endif()
 SET(COTIRE_INTDIR "cotire")
 
 # Define helper functions and macros.
-cmake_policy(SET CMP0011 OLD)
 INCLUDE(build/Utils.cmake)
 if(ENABLE_PRECOMPILED_HEADERS)
 	INCLUDE(build/Cotire.cmake)
@@ -65,7 +70,7 @@ if(OpenMVS_USE_OPENMP)
 		SET(_USE_OPENMP TRUE)
 		#cmake only check for separate OpenMP library on AppleClang 7+
 		#https://github.com/Kitware/CMake/blob/42212f7539040139ecec092547b7d58ef12a4d72/Modules/FindOpenMP.cmake#L252
-		if (CMAKE_CXX_COMPILER_ID MATCHES "AppleClang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "7.0")
+		if (CMAKE_CXX_COMPILER_ID MATCHES "AppleClang" AND (NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS "7.0"))
 			SET(OpenMP_LIBS ${OpenMP_libomp_LIBRARY})
 			LIST(APPEND OpenMVS_EXTRA_LIBS ${OpenMP_LIBS})
 		endif()
@@ -75,6 +80,9 @@ if(OpenMVS_USE_OPENMP)
 endif()
 
 if(OpenMVS_USE_OPENGL)
+	if(POLICY CMP0072)
+		cmake_policy(SET CMP0072 NEW)
+	endif()
 	FIND_PACKAGE(OpenGL)
 	if(OPENGL_FOUND)
 		INCLUDE_DIRECTORIES(${OPENGL_INCLUDE_DIR})
